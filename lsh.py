@@ -5,6 +5,41 @@ Algorithms based on 'Mining of Massive Datasets'
 """
 from unionfind import UnionFind
 from collections import defaultdict
+from collections import defaultdict, namedtuple
+from copy import deepcopy
+
+
+def shingle(s, k):
+    """Generate k-length shingles of string s"""
+    k = min(len(s), k)
+    for i in range(len(s) - k + 1):
+        yield s[i:i+k]
+
+def sshingle(word, n):
+    """
+    Not using a generator here, unlike the initial implementation,
+    both because it doesn't save a ton of memory in this use case
+    and because it was borking the creation of minhashes.
+    """
+    return set([word[i:i + n] for i in range(len(word) - n + 1)])
+        
+def hshingle(s, k):
+    """Generate k-length shingles then hash"""
+    for s in shingle(s, k):
+        yield hash(s)
+
+def jaccard_sim(X, Y):
+    """Jaccard similarity between two sets"""
+    x = set(X)
+    y = set(Y)
+    return float(len(x & y)) / len(x | y)
+
+def jaccard_dist(X, Y):
+    """Jaccard distance between two sets"""
+    return 1 - jaccard_sim(X, Y)
+
+
+LabelSetObj = namedtuple('LabelSetObj', 'label set obj')
 
 
 class Signature:
@@ -118,27 +153,29 @@ class Cluster:
             self.hashmaps[band_idx][hshval].append(label)
             self.unionfind.union(label, self.hashmaps[band_idx][hshval][0])
 
+    def add_set_with_min_constraint(self, label_set_obj, constraint_min,
+                                    constraint_fn=lambda lso1, lso2:
+                                        jaccard_sim(lso1.set, lso2.set)):
+        # Add to unionfind structure
+        self.unionfind[label_set_obj.label]
+
+        # Get signature
+        sig = self.signer.sign(label_set_obj.set)
+
+        # Union labels with same LSH key in same band that satisfy constraint
+        for band_idx, hshval in enumerate(self.hasher.hash(sig)):
+            found = False
+            jsc = [(constraint_fn(label_set_obj, cluster[0]), cluster)
+                   for cluster in self.hashmaps[band_idx][hshval]]
+            jsc = sorted([(js, cluster) for js, cluster in jsc
+                          if js >= constraint_min], reverse=True)
+            if jsc:
+                cluster = jsc[0][1]
+                cluster.append(deepcopy(label_set_obj))
+                self.unionfind.union(label_set_obj.label, cluster[0].label)
+                found = True
+            if not found:
+                self.hashmaps[band_idx][hshval].append([deepcopy(label_set_obj)])
+            
     def get_sets(self):
         return self.unionfind.sets()
-
-
-def shingle(s, k):
-    """Generate k-length shingles of string s"""
-    k = min(len(s), k)
-    for i in range(len(s) - k + 1):
-        yield s[i:i+k]
-
-def hshingle(s, k):
-    """Generate k-length shingles then hash"""
-    for s in shingle(s, k):
-        yield hash(s)
-
-def jaccard_sim(X, Y):
-    """Jaccard similarity between two sets"""
-    x = set(X)
-    y = set(Y)
-    return float(len(x & y)) / len(x | y)
-
-def jaccard_dist(X, Y):
-    """Jaccard distance between two sets"""
-    return 1 - jaccard_sim(X, Y)
