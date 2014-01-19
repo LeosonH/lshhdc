@@ -22,7 +22,7 @@ def sshingle(word, n):
     and because it was borking the creation of minhashes.
     """
     return set([word[i:i + n] for i in range(len(word) - n + 1)])
-        
+
 def hshingle(s, k):
     """Generate k-length shingles then hash"""
     for s in shingle(s, k):
@@ -39,10 +39,7 @@ def jaccard_dist(X, Y):
     return 1 - jaccard_sim(X, Y)
 
 
-LabelSetObj = namedtuple('LabelSetObj', 'label set obj')
-
-
-class Signature:
+class Signature(object):
     """Signature Base class."""
 
     def __init__(self, dim):
@@ -75,7 +72,7 @@ class MinHashSignature(Signature):
         return sig
 
 
-class LSH:
+class LSH(object):
     """Locality sensitive hashing.  Uses a banding approach to hash
     similar signatures to the same buckets."""
     def __init__(self, length, threshold):
@@ -120,7 +117,7 @@ class LSH:
         return int(self.length / self.bandwidth)
 
 
-class Cluster:
+class Cluster(object):
     """Clusters sets with Jaccard similarity above threshold with high
     probability.
 
@@ -153,29 +150,107 @@ class Cluster:
             self.hashmaps[band_idx][hshval].append(label)
             self.unionfind.union(label, self.hashmaps[band_idx][hshval][0])
 
-    def add_set_with_min_constraint(self, label_set_obj, constraint_min,
-                                    constraint_fn=lambda lso1, lso2:
-                                        jaccard_sim(lso1.set, lso2.set)):
+    def get_sets(self):
+        return self.unionfind.sets()
+
+
+class ConstrainedCluster(Cluster):
+
+    """To fight the problem of big clusters created by the aggregation of a
+    large number of false positives (i.e. two items found to be a candidate
+    pair, but that really shouldn't belong to the same cluster), this class
+    introduces an extra constraint which must be met for two items to be
+    clustered. This mechanism imposes that we keep track of extra items, that
+    are encapsulated in the LabelObj namedtuple. The constraint, by default, is
+    that the Jaccard Similarity must be as high as the hasher threshold, which
+    is defined with this anonymous function:
+
+    lambda lo1, lo2: jaccard_sim(lo1.obj, lo2.obj)
+
+    where the lo's are object of type LabelObj. However, this could be easily
+    redefined to a function possibly more useful in some context, like the
+    Levenshtein Ratio for instance (or any other similarity function to be
+    maximized):
+
+    lambda lo1, lo2: Levenshtein.ratio(lo1.obj, lo2.obj)
+
+    which will work, provided that an "obj" argument has been previously passed
+    to add_set.  In this case "obj" is a string, but it could be of whatever
+    type, as long as the "contraint_fn" function properly handles it.
+    """
+
+    # Structure to be stored in the ConstrainedCluster.hashmaps band/hash cell
+    # cluster lists.
+    LabelObj = namedtuple('LabelObj', 'label obj')
+    
+    def __init__(self, width=10, threshold=0.5,
+                 constraint_min=None,
+                 constraint_fn=lambda lo1, lo2:
+                                   jaccard_sim(lo1.obj, lo2.obj)):
+        super(ConstrainedCluster, self).__init__(width, threshold)
+        if constraint_min is None:
+            self.constraint_min = threshold
+        else:
+            self.constraint_min = constraint_min
+        self.constraint_fn = constraint_fn
+        # Note that self.hashmaps, although having the same structure as in the
+        # parent class, is used quite differently here: each band/hash cell now
+        # corresponds to a list of lists (instead of a single list). Each list
+        # contains at least one LabelSetObj instance, and will possibly grow
+        # when hash collisions occur. However, to be fused within a certain
+        # list, an item must be similar enough to its first item (i.e. the
+        # constraint must be satisfied). If no list is found with an item to
+        # satisfy the constraint, a new list with the element is simply appended
+        # to the band/hash cell.
+
+    def add_set(self, s, label=None, obj=None):
+        # A label for this set
+        if not label:
+            label = s
+
+        # if obj is not defined, s is used
+        lo = ConstrainedCluster.LabelObj(label, obj if obj else s)
+
         # Add to unionfind structure
-        self.unionfind[label_set_obj.label]
+        self.unionfind[label]
 
         # Get signature
-        sig = self.signer.sign(label_set_obj.set)
+        sig = self.signer.sign(s)
 
         # Union labels with same LSH key in same band that satisfy constraint
         for band_idx, hshval in enumerate(self.hasher.hash(sig)):
             found = False
-            jsc = [(constraint_fn(label_set_obj, cluster[0]), cluster)
+            # apply the constraint function to compare the current element
+            # to every first element of every candidate clusters
+            jsc = [(self.constraint_fn(lo, cluster[0]), cluster)
                    for cluster in self.hashmaps[band_idx][hshval]]
+            # retain the best (if it exists) of those over the threshold
             jsc = sorted([(js, cluster) for js, cluster in jsc
-                          if js >= constraint_min], reverse=True)
+                          if js >= self.constraint_min], reverse=True)
             if jsc:
                 cluster = jsc[0][1]
-                cluster.append(deepcopy(label_set_obj))
-                self.unionfind.union(label_set_obj.label, cluster[0].label)
+                cluster.append(deepcopy(lo))
+                # the candidate pair is now clustered
+                self.unionfind.union(lo.label, cluster[0].label)
                 found = True
             if not found:
-                self.hashmaps[band_idx][hshval].append([deepcopy(label_set_obj)])
-            
-    def get_sets(self):
-        return self.unionfind.sets()
+                self.hashmaps[band_idx][hshval].append([deepcopy(lo)])
+
+
+if __name__ == '__main__':
+
+    n = 2
+    sa = sshingle("12345abcdef", n)
+    sb = sshingle("54321abcdef", n)
+
+    print jaccard_sim(sa, sb)
+
+    cluster = Cluster()
+    cluster.add_set(sa, 'a')
+    cluster.add_set(sb, 'b')
+    print 'Cluster:', cluster.get_sets()
+
+    cluster = ConstrainedCluster()
+    cluster.add_set(sa, 'a')
+    cluster.add_set(sb, 'b')
+    print 'ConstrainedCluster:', cluster.get_sets()
