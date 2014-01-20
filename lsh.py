@@ -15,14 +15,6 @@ def shingle(s, k):
     for i in range(len(s) - k + 1):
         yield s[i:i+k]
 
-def sshingle(word, n):
-    """
-    Not using a generator here, unlike the initial implementation,
-    both because it doesn't save a ton of memory in this use case
-    and because it was borking the creation of minhashes.
-    """
-    return set([word[i:i + n] for i in range(len(word) - n + 1)])
-
 def hshingle(s, k):
     """Generate k-length shingles then hash"""
     for s in shingle(s, k):
@@ -182,7 +174,7 @@ class ConstrainedCluster(Cluster):
     # Structure to be stored in the ConstrainedCluster.hashmaps band/hash cell
     # cluster lists.
     LabelObj = namedtuple('LabelObj', 'label obj')
-    
+
     def __init__(self, width=10, threshold=0.5,
                  constraint_min=None,
                  constraint_fn=lambda lo1, lo2:
@@ -234,23 +226,24 @@ class ConstrainedCluster(Cluster):
                 self.unionfind.union(lo.label, cluster[0].label)
                 found = True
             if not found:
+                # no clustering is performed
                 self.hashmaps[band_idx][hshval].append([deepcopy(lo)])
 
 
 if __name__ == '__main__':
 
     n = 2
-    sa = sshingle("12345abcdef", n)
-    sb = sshingle("54321abcdef", n)
+    sa = set(shingle("1234abcdef", n))
+    sb = set(shingle("4321abcdef", n))
 
-    print jaccard_sim(sa, sb)
+    print 'Jaccard Sim:', jaccard_sim(sa, sb)
 
     cluster = Cluster()
     cluster.add_set(sa, 'a')
     cluster.add_set(sb, 'b')
-    print 'Cluster:', cluster.get_sets()
+    print 'Cluster:', cluster.get_sets() # [['a', 'b']]
 
     cluster = ConstrainedCluster()
     cluster.add_set(sa, 'a')
     cluster.add_set(sb, 'b')
-    print 'ConstrainedCluster:', cluster.get_sets()
+    print 'ConstrainedCluster:', cluster.get_sets() # [['a'], ['b']]
