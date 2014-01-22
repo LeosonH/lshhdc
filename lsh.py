@@ -7,6 +7,7 @@ from unionfind import UnionFind
 from collections import defaultdict
 from collections import defaultdict, namedtuple
 from copy import deepcopy
+import operator
 
 
 def shingle(s, k):
@@ -228,6 +229,75 @@ class ConstrainedCluster(Cluster):
             if not found:
                 # no clustering is performed
                 self.hashmaps[band_idx][hshval].append([deepcopy(lo)])
+
+
+class SemiParallelConstrainedCluster(Cluster):
+
+    """This is a semi-parallel version of ConstrainedCluster, to be used with
+    multiprocessing; explanations and documentation soon to come..
+    """
+
+    # Structure to be stored in the ConstrainedCluster.hashmaps band/hash cell
+    # cluster lists.
+    LabelObj = namedtuple('LabelObj', 'label obj')
+
+    def __init__(self, width=10, threshold=0.5,
+                 constraint_min=None,
+                 constraint_fn=lambda lo1, lo2:
+                                   jaccard_sim(lo1.obj, lo2.obj),
+                 sigmaps_to_merge=None):
+        super(SemiParallelConstrainedCluster, self).__init__(width, threshold)
+        if constraint_min is None:
+            self.constraint_min = threshold
+        else:
+            self.constraint_min = constraint_min
+        self.constraint_fn = constraint_fn
+        # Note that self.hashmaps, although having the same structure as in the
+        # parent class, is used quite differently here: each band/hash cell now
+        # corresponds to a list of lists (instead of a single list). Each list
+        # contains at least one LabelSetObj instance, and will possibly grow
+        # when hash collisions occur. However, to be fused within a certain
+        # list, an item must be similar enough to its first item (i.e. the
+        # constraint must be satisfied). If no list is found with an item to
+        # satisfy the constraint, a new list with the element is simply appended
+        # to the band/hash cell.
+        if sigmaps_to_merge is None:
+            self.sigmap = {}
+        else:
+            self.sigmap = dict(reduce(operator.__add__, [sm.items() for sm in sigmaps_to_merge]))
+
+    def sign(self, s, label=None, obj=None):
+        # A label for this set
+        if not label:
+            label = s
+        self.sigmap[label] = (self.signer.sign(s) if s else None,
+                              obj if obj else s)
+
+    def find_clusters(self):
+        for label, (sig, obj) in self.sigmap.iteritems():
+            self.unionfind[label]
+            if sig is None: continue
+            lo = ConstrainedCluster.LabelObj(label, obj)
+
+            # Union labels with same LSH key in same band that satisfy constraint
+            for band_idx, hshval in enumerate(self.hasher.hash(sig)):
+                found = False
+                # apply the constraint function to compare the current element
+                # to every first element of every candidate clusters
+                jsc = [(self.constraint_fn(lo, cluster[0]), cluster)
+                       for cluster in self.hashmaps[band_idx][hshval]]
+                # retain the best (if it exists) of those over the threshold
+                jsc = sorted([(js, cluster) for js, cluster in jsc
+                              if js >= self.constraint_min], reverse=True)
+                if jsc:
+                    cluster = jsc[0][1]
+                    cluster.append(deepcopy(lo))
+                    # the candidate pair is now clustered
+                    self.unionfind.union(lo.label, cluster[0].label)
+                    found = True
+                if not found:
+                    # no clustering is performed
+                    self.hashmaps[band_idx][hshval].append([deepcopy(lo)])
 
 
 if __name__ == '__main__':
