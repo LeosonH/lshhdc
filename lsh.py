@@ -264,7 +264,8 @@ class SemiParallelConstrainedCluster(Cluster):
         if sigmaps_to_merge is None:
             self.sigmap = {}
         else:
-            self.sigmap = dict(reduce(operator.__add__, [sm.items() for sm in sigmaps_to_merge]))
+            self.sigmap = dict(reduce(operator.__add__,
+                                      [sm.items() for sm in sigmaps_to_merge]))
 
     def sign(self, s, label=None, obj=None):
         # A label for this set
