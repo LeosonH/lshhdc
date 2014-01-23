@@ -73,7 +73,7 @@ class LSH(object):
         self.threshold = threshold
         self.bandwidth = self.get_bandwidth(length, threshold)
 
-    def hash(self, sig):
+    def hash(self, sig, band_idx=None):
         """Generate hashvals for this signature"""
         for band in zip(*(iter(sig),) * self.bandwidth):
             yield hash("salt" + str(band) + "tlas")
@@ -212,7 +212,6 @@ class ConstrainedCluster(Cluster):
 
         # Union labels with same LSH key in same band that satisfy constraint
         for band_idx, hshval in enumerate(self.hasher.hash(sig)):
-            found = False
             # apply the constraint function to compare the current element
             # to every first element of every candidate clusters
             jsc = [(self.constraint_fn(lo, cluster[0]), cluster)
@@ -225,28 +224,23 @@ class ConstrainedCluster(Cluster):
                 cluster.append(deepcopy(lo))
                 # the candidate pair is now clustered
                 self.unionfind.union(lo.label, cluster[0].label)
-                found = True
-            if not found:
+            else:
                 # no clustering is performed
                 self.hashmaps[band_idx][hshval].append([deepcopy(lo)])
 
 
-class SemiParallelConstrainedCluster(Cluster):
+class SemiParallellizableConstrainedCluster(Cluster):
 
     """This is a semi-parallel version of ConstrainedCluster, to be used with
     multiprocessing; explanations and documentation soon to come..
     """
-
-    # Structure to be stored in the ConstrainedCluster.hashmaps band/hash cell
-    # cluster lists.
-    LabelObj = namedtuple('LabelObj', 'label obj')
 
     def __init__(self, width=10, threshold=0.5,
                  constraint_min=None,
                  constraint_fn=lambda lo1, lo2:
                                    jaccard_sim(lo1.obj, lo2.obj),
                  sigmaps_to_merge=None):
-        super(SemiParallelConstrainedCluster, self).__init__(width, threshold)
+        super(SemiParallellizableConstrainedCluster, self).__init__(width, threshold)
         if constraint_min is None:
             self.constraint_min = threshold
         else:
@@ -282,7 +276,6 @@ class SemiParallelConstrainedCluster(Cluster):
 
             # Union labels with same LSH key in same band that satisfy constraint
             for band_idx, hshval in enumerate(self.hasher.hash(sig)):
-                found = False
                 # apply the constraint function to compare the current element
                 # to every first element of every candidate clusters
                 jsc = [(self.constraint_fn(lo, cluster[0]), cluster)
@@ -295,8 +288,7 @@ class SemiParallelConstrainedCluster(Cluster):
                     cluster.append(deepcopy(lo))
                     # the candidate pair is now clustered
                     self.unionfind.union(lo.label, cluster[0].label)
-                    found = True
-                if not found:
+                else:
                     # no clustering is performed
                     self.hashmaps[band_idx][hshval].append([deepcopy(lo)])
 
